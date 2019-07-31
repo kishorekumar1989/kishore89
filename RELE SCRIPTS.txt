@@ -1,0 +1,259 @@
+Freeze.sh file
+
+#!/usr/bin/env bash
+
+RELEASE="${1}"
+RELEASE_FOLDER="/deployments/GACDW_BI/R${RELEASE}/"
+[ -d "${RELEASE_FOLDER}" ] || { echo "Folder \"${RELEASE_FOLDER}\" was not found. Aborting..."; exit 1; }
+
+echo "Freezing ${RELEASE_FOLDER}..."
+sudo chown -R root:root "${RELEASE_FOLDER}"
+sudo chmod -R a-w "${RELEASE_FOLDER}"
+
+find "${RELEASE_FOLDER}" -type f | xargs ls -l
+
+GET-DOC.sh
+
+#!/usr/bin/env bash
+
+RELEASE="${1}"
+
+for geo in All_GEOS AG AP EU LA JP IN Inv360; do
+    find /deployments/GACDW_BI/*"${RELEASE}"/ -type f | grep /$geo/ | grep -q txt$ && echo -e "### $geo Instructions\n"
+    for instruction in $(find /deployments/GACDW_BI/*"${RELEASE}"/ -type f | grep /$geo/ | grep txt$ | sort); do
+        echo -e "* \`$instruction\`\n"
+        echo "\`\`\`plain"
+        cat $instruction
+        echo # in case there is EOL at the end of the file
+        echo -e "\`\`\`\n"
+    done
+done
+
+GET-PACKAGE.sh
+
+# Find packages
+RELEASE="${1}" # <----------------------- Change this
+find /deployments/GACDW_BI/*"${RELEASE}"/ -type f
+# ---------------------------------------------------
+
+GET-SNAPSHOT.sh
+
+#!/usr/bin/env bash
+
+udclient="/opt/ibm-ucd/agent/opt/udclient/udclient"
+UCD_APPLICATION="GACDW GTS-CDI"
+
+init_script="$(dirname "$0")/init-ucd-connection.sh"
+
+[ -n "${DS_USERNAME}" ] && [ -n "${DS_PASSWORD}" ] && [ -n "${DS_WEB_URL}" ] \
+    || { echo -e "Some UCD params are not set. Pls use \e[33msource \"${init_script}\"\e[0m command to init the values Aborting..."; exit 1; }
+
+release="${1}"
+
+snapshots_main=(); versions_main=()
+snapshots_backout=(); versions_backout=()
+
+for snapshot_id in $("${udclient}" getSnapshotsInApplication --application "${UCD_APPLICATION}" |  grep -B1 "\"name\": \"R${release}" | grep "\"id\"" | cut -f2 -d: | tr -d " \","); do
+    snapshot_name="$(
+        "${udclient}" getSnapshot --snapshot "${snapshot_id}" | \
+        python -c "import json; import sys; print json.load(sys.stdin)['name'];"
+    )"
+    if [ "${snapshot_name:(-7)}" != "Backout" ]; then
+        snapshots_main+=("* [${snapshot_name}](https://ratsuite207.sby.ibm.com:8443/#snapshot/${snapshot_id}/versions)")
+    else
+        snapshots_backout+=("* [${snapshot_name}](https://ratsuite207.sby.ibm.com:8443/#snapshot/${snapshot_id}/versions)")
+    fi
+done
+
+echo -e "## Release Artifacts\n"
+echo -e "### Release Snapshots\n"
+if [ ${#snapshots_main[@]} != 0 ]; then
+    for snapshot_main in "${snapshots_main[@]}"; do echo "${snapshot_main}"; done
+    echo
+else
+    echo "No release snapshots for R${release}"
+fi
+
+echo -e "## Backout Artifacts\n"
+echo -e "### Backout Snapshots\n"
+if [ ${#snapshots_backout[@]} != 0 ]; then
+    for snapshot_backout in "${snapshots_backout[@]}"; do echo "${snapshot_backout}"; done
+    echo
+else
+    echo "No backout snapshots for R${release}"
+fi
+
+
+GET-VERSION.sh
+
+#!/usr/bin/env python2
+
+import json
+import os
+import sys
+
+init_script = (os.popen('dirname %s' % sys.argv[0]).read() + '/init-ucd-connection.sh').replace('\n', '')
+
+if not (('DS_WEB_URL' in os.environ) and ('DS_USERNAME' in os.environ) and ('DS_PASSWORD' in os.environ)):
+    print os.popen('echo -e "Some UCD params are not set. Pls use the following command to init the values:"').read()
+    print 'source "%s"\n' % init_script
+    print 'Aborting...'
+    exit(1)
+
+GET-WORKITEAM.sh
+
+#!/usr/bin/env bash
+
+function get_release_files {
+    RELEASE="$1"
+    find /deployments/GACDW_BI/*"${RELEASE}"/ -type f
+}
+
+release="$1"
+echo -e "## Work Items\n"
+for work_item in $({ 
+    get_release_files "${release}" | egrep -o "[[:digit:]]{6}"; \
+    get_release_files "${release}" | grep txt$ | xargs -n1 egrep -o "[[:digit:]]{6}"; \
+} | sort -u); do
+    echo "* [$work_item](https://ratsuite192.sby.ibm.com:9443/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/$work_item)"
+done
+
+INIT.UCD CONNECTION.sh
+
+#!/usr/bin/env bash
+
+[[ $_ != $0 ]] || { echo -e "Pls do NOT run the script but source it via the following command:\e[33m source \"${0}\"\e[0m"; exit 1; }
+
+DS_WEB_URL="https://ratsuite207.sby.ibm.com:8443"
+JAVA_HOME="/opt/ibm/java-x86_64-70/jre"
+read -p "Pls type your UCD username: " DS_USERNAME
+read -p "Pls type your UCD password (no output will be shown on screen): " -s DS_PASSWORD
+echo
+
+export JAVA_HOME DS_PASSWORD DS_USERNAME DS_WEB_URL
+
+NEW-RELEASEFOLDER.SH
+
+#!/usr/bin/env bash
+
+RELEASE="${1}"
+RELEASE_FOLDER="/deployments/GACDW_BI/R${RELEASE}/"
+
+[ -n "${RELEASE}" ] || { echo "Cannot create folder without release ID. Aborting..."; exit 1; }
+
+echo "Creating ${RELEASE_FOLDER}..."
+sudo su -c "mkdir -p \"${RELEASE_FOLDER}\"/{AG,AP,EU,LA,All_GEOS,Inv360,JP,IN}" all_writers
+sudo chmod -R g+w "${RELEASE_FOLDER}"
+
+ls -l "${RELEASE_FOLDER}" 
+
+UNLOCKRELEASE.SH
+
+#!/usr/bin/env bash
+
+RELEASE="${1}"
+RELEASE_FOLDER="/deployments/GACDW_BI/R${RELEASE}/"
+[ -d "${RELEASE_FOLDER}" ] || { echo "Folder \"${RELEASE_FOLDER}\" was not found. Aborting..."; exit 1; }
+
+echo "Unlocking ${RELEASE_FOLDER}..."
+sudo chown -R all_writers:all_writers "${RELEASE_FOLDER}"
+sudo chmod -R ug+w "${RELEASE_FOLDER}"
+
+find "${RELEASE_FOLDER}" -type f | xargs ls -l
+
+
+UPLOADPACKAGE.SH
+
+#!/usr/bin/env bash
+
+udclient="/opt/ibm-ucd/agent/opt/udclient/udclient"
+UCD_APPLICATION="GACDW GTS-CDI"
+
+init_script="$(dirname "$0")/init-ucd-connection.sh"
+
+[ -n "${DS_USERNAME}" ] && [ -n "${DS_PASSWORD}" ] && [ -n "${DS_WEB_URL}" ] \
+    || { echo -e "Some UCD params are not set. Pls use \e[33msource \"${init_script}\"\e[0m command to init the values Aborting..."; exit 1; }
+
+function get_sql_separator {
+    PACKAGE="${1}"
+
+    lines_with_semicolon=$(egrep -c ";[[:space:]]*$" "${PACKAGE}")
+    lines_with_at=$(egrep -c "@[[:space:]]*$" "${PACKAGE}")
+
+    if [[ $lines_with_semicolon -gt $lines_with_at ]]; then
+        echo ";"
+    else
+        echo "@"
+    fi
+}
+
+package="${1}"
+if [ "${2,,}" == "--backout" ]; then is_backout=1; else is_backout=0; fi
+[ -f "${package}" ] || { echo "\"${package}\" was not found. Aborting..."; exit 1; }
+[ "${package:0:1}" == "/" ] || { echo "Please use full package name (starting from root) instead of \"${package}\". Aborting..."; exit 1; }
+package_extension="${package:(-3)}"; package_extension="${package_extension,,}"
+package_name="$(basename "${package}")"; package_name="${package_name:0:$((${#package_name} - 4))}"
+release="$(echo "${package}" | cut -d/ -f 4)"; release="${release:1}"
+geo="$(echo "${package}" | cut -d/ -f 5)"; [ "${geo^^}" == "ALL_GEOS" ] && geo="AG AP EU LA"
+
+case "${package_extension}" in
+    "sql")
+        script_file="$(basename "${package}")"
+        separator="$(get_sql_separator "${package}")"
+        command_file="install.cmd"
+        temp_dir="$(mktemp -d)"
+        db_archive_name="GTS-SDI.script.zip"
+        cp "${package}" "${temp_dir}"
+        cd "${temp_dir}"
+        echo "MKDIR log" > "${command_file}"
+        echo "db2 CONNECT TO GDWAGM" >> "${command_file}"
+        echo "db2 -td${separator} -vf \"${script_file}\" 1> \"log/${script_file}.log\"" >> "${command_file}"
+        echo "db2 CONNECT RESET" >> "${command_file}"
+        zip "${db_archive_name}" ./* 1>/dev/null
+        cd "${OLDPWD}"
+        package="${temp_dir}/${db_archive_name}"
+        ucd_component="GACDW SDI DB"
+        ;;
+    "pkg") ucd_component="GACDW SDI ETL";;
+    "zip")
+        [ "${package_name}" == "GACDW_DDL_METADATA" ] || { echo "\e[33mUnknown package type for \"${package}\"\e[0m. Aborting..."; exit 1; }
+        ucd_component="GACDW SDI DB"
+        ;;
+    "war") 
+        case "${package_name}" in
+            "cdi-selfservice-upload-api") ucd_component="CDI 2.0 cdi-selfservice-upload-api.war";;
+            "*") 
+                "\e[33mUnknown package type for \"${package}\"\e[0m. Aborting..."
+                exit 1
+                ;;
+        esac
+        ;;
+    "*") 
+        echo "\e[33mUnknown package type for \"${package}\"\e[0m. Aborting..."
+        exit 1
+        ;;
+esac
+
+ucd_version_name="${geo} R${release} ${package_name}"
+ucd_version_id="$(\
+    "${udclient}" createVersion --component "${ucd_component}" --name "${ucd_version_name}" \
+    | python -c "import json; import sys; print json.load(sys.stdin)['id'];"\
+)"
+"${udclient}" addVersionFiles --version "${ucd_version_id}" --base "$(dirname "${package}")" --include "$(basename "${package}")"
+for single_geo in $geo; do "${udclient}" addVersionStatus --version "${ucd_version_id}" --status "GACDW SDI - ${single_geo}" > /dev/null; done
+"${udclient}" addVersionStatus --version "${ucd_version_id}" --status "GACDW CDI $(echo $release | cut -d"." -f1)" > /dev/null
+"${udclient}" addVersionStatus --version "${ucd_version_id}" --status "GACDW - Ready for Pre-Prod" > /dev/null
+"${udclient}" addVersionStatus --version "${ucd_version_id}" --status "GACDW - Golden artifact" > /dev/null
+for single_geo in $geo; do
+    if [[ $is_backout -eq 0 ]]; then ucd_snapshot_name="R${release}${single_geo}"; else ucd_snapshot_name="R${release}${single_geo}_Backout"; fi
+    echo "{\"name\": \"${ucd_snapshot_name}\", \"application\": \"${UCD_APPLICATION}\"}" | "${udclient}" createSnapshot - >/dev/null 2>&1
+    ucd_snapshot_id="$(\
+        "${udclient}" getSnapshot --application "${UCD_APPLICATION}" --snapshot "${ucd_snapshot_name}" \
+        | python -c "import json; import sys; print json.load(sys.stdin)['id'];"\
+    )"
+    "${udclient}" addVersionToSnapshot --snapshot "${ucd_snapshot_id}" --version "${ucd_version_id}" >/dev/null
+done
+echo "* **${ucd_component}**: [${ucd_version_name}](https://ratsuite207.sby.ibm.com:8443/#version/${ucd_version_id})"
+
+[ "${package_extension,,}" == "sql" ] && rm -rf "${temp_dir}"
+
